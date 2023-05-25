@@ -150,9 +150,6 @@ pub struct PointRatioInfo {
     pub ratio: u32,
 }
 
-#[cw_serde]
-pub struct NftMetadata {}
-
 impl Into<std::string::String> for Direction {
     fn into(self) -> std::string::String {
         // Convert the direction to a string and return it
