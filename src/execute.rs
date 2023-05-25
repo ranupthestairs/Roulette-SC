@@ -3,17 +3,18 @@ use crate::msg::{
     BetConfig, BetsInfoResponse, Direction, ExecuteMsg, InstantiateMsg, MigrateMsg, PointRatioInfo,
 };
 use crate::state::{
-    self, bet_info_key, bet_info_storage, AssetInfo, BetInfo, Config, RoomConfig, State, CONFIG,
+    bet_info_key, bet_info_storage, AssetInfo, BetInfo, Config, RoomConfig, State, CONFIG,
     MINIMUMRESERVE, ROOMS, STATE, WINNERNUMBER,
 };
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::testing::{mock_env, mock_info};
 use cosmwasm_std::{
-    attr, to_binary, Addr, Attribute, Binary, Coin, CosmosMsg, Decimal, Deps, DepsMut, Env, Event,
-    MessageInfo, Order, QueryRequest, Response, StdError, StdResult, Uint128, WasmMsg, WasmQuery,
+    attr, to_binary, Addr, Attribute, Binary, Coin, CosmosMsg, Decimal, Deps, DepsMut, Empty, Env,
+    Event, MessageInfo, Order, QueryRequest, Response, StdError, StdResult, Uint128, WasmMsg,
+    WasmQuery,
 };
 use cw20::{BalanceResponse, Cw20ExecuteMsg, Cw20QueryMsg};
+use cw721::{AllNftInfoResponse, Cw721QueryMsg};
 
 use crate::rand::{sha_256, Prng};
 
@@ -46,7 +47,7 @@ pub fn instantiate(
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> StdResult<Response> {
+pub fn migrate(deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
     let version = cw2::get_contract_version(deps.storage)?;
     if version.contract != CONTRACT_NAME {
         return Err(StdError::generic_err("Can only upgrade from same type"));
@@ -70,9 +71,17 @@ pub fn execute(
         ExecuteMsg::AddRoom { room_info } => execute_add_room(deps, info, room_info),
         ExecuteMsg::Bet { room_id, bet_info } => execute_bet(deps, env, info, room_id, bet_info),
         ExecuteMsg::CloseRound {} => execute_close(deps, env, info),
-        ExecuteMsg::WithdrawFromPool { amount } => {
-            execute_withdraw_from_pool(deps, env, info, amount)
+        ExecuteMsg::WithdrawFromPool { room_id, amount } => {
+            execute_withdraw_from_pool(deps, env, info, room_id, amount)
         }
+        ExecuteMsg::Deposit { room_id, amount } => {
+            execute_deposit(deps, env, info, room_id, amount)
+        }
+        ExecuteMsg::ChangeRoomConfig {
+            room_id,
+            room_name,
+            nft_id,
+        } => execute_change_room_config(deps, info, room_id, room_name, nft_id),
     }
 }
 
@@ -95,11 +104,21 @@ fn execute_add_room(
 ) -> Result<Response, ContractError> {
     assert_is_admin(deps.as_ref(), info)?;
 
+    let config = CONFIG.load(deps.storage)?;
     let state = STATE.load(deps.storage)?;
     STATE.update(deps.storage, |mut state| -> StdResult<_> {
         state.room_id = state.room_id + 1;
         Ok(state)
     })?;
+
+    let _nft_info: AllNftInfoResponse<Option<Empty>> =
+        deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+            contract_addr: config.nft_contract.to_string(),
+            msg: to_binary(&Cw721QueryMsg::AllNftInfo {
+                token_id: room_info.clone().nft_id,
+                include_expired: None,
+            })?,
+        }))?;
 
     //increase the room id by one
     let new_room_id = state.room_id + 1;
@@ -143,7 +162,7 @@ fn execute_bet(
     //user can only bet once on round for the same room
     assert_not_double_bet(deps.as_ref(), room_id, living_round, &player)?;
     //validate the input amount for the case the input denom is native token
-    validate_input_amount(&info.funds, &bet_info, &room_info.game_denom)?;
+    validate_input_amount(&info.funds, total_bet_amount, &room_info.game_denom)?;
     //check if the user's maximum reward can exceed on the pool limit
     let withdraw_limit_for_admin = validate_maximum_reward_exceed(
         deps.as_ref(),
@@ -172,7 +191,7 @@ fn execute_bet(
 
     match room_info.game_denom {
         AssetInfo::Token { contract_addr } => {
-            let cw20_trnasfer_from_msg = get_cw20_transfer_from_msg(
+            let cw20_transfer_from_msg = get_cw20_transfer_from_msg(
                 &contract_addr,
                 &player,
                 &contract_address,
@@ -185,7 +204,7 @@ fn execute_bet(
                     attr("room_id", room_id.to_string()),
                 ])
                 .add_attributes(bet_info_attributes)
-                .add_message(cw20_trnasfer_from_msg))
+                .add_message(cw20_transfer_from_msg))
         }
         AssetInfo::NativeToken { denom: _denom } => Ok(Response::new()
             .add_attributes(vec![
@@ -213,7 +232,6 @@ fn execute_close(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response,
 
     let transfer_messages: Vec<CosmosMsg> =
         distribute_reward_to_users(deps.as_ref(), living_round, state.room_id, winner)?;
-
     MINIMUMRESERVE.save(deps.storage, &Uint128::new(0))?;
 
     Ok(Response::new()
@@ -230,19 +248,25 @@ fn distribute_reward_to_users(
     winner: u32,
 ) -> StdResult<Vec<CosmosMsg>> {
     let mut transfer_msgs: Vec<CosmosMsg> = Vec::new();
+
+    let config = CONFIG.load(deps.storage)?;
     //on a room basis, we will calculate the reward because the bet denom is different from each room.
     for i in 1..last_room_id + 1 {
         let room_id = i;
         let room_info = ROOMS.load(deps.storage, &room_id.to_string())?;
+        let mut total_bet_amount = Uint128::zero();
+        let mut user_winning_amount = Uint128::zero();
         //get player list for this room and this round_id
         let players_info = query_all_members_one_round_room(deps, room_id, round_id)?;
         for player_info in players_info.bets_info {
             //for each users, he can do several bets for one transaction
             for bet in &player_info.bet_info {
+                total_bet_amount = total_bet_amount + bet.amount;
                 let point_ratio_info = get_points_ratio_information(&bet.direction)?;
                 let index = point_ratio_info.points.iter().position(|&x| x == winner);
                 if index.is_some() {
                     let reward = bet.amount * Uint128::new(point_ratio_info.ratio as u128);
+                    user_winning_amount = user_winning_amount + reward;
                     let recipient = &deps.api.addr_validate(&player_info.player)?;
                     let transfer_msg = match &room_info.game_denom {
                         AssetInfo::Token { contract_addr } => {
@@ -256,8 +280,126 @@ fn distribute_reward_to_users(
                 }
             }
         }
+
+        println!(
+            "total bet amount {:?} user bet amount {:?}",
+            total_bet_amount, user_winning_amount
+        );
+        //send some percent of round reward to the admin as platform fee.
+        if total_bet_amount > user_winning_amount {
+            let reward_for_admin_side = total_bet_amount - user_winning_amount;
+            let game_fee = reward_for_admin_side * config.platform_fee;
+            if game_fee > Uint128::zero() {
+                let transfer_msg = match &room_info.game_denom {
+                    AssetInfo::Token { contract_addr } => {
+                        get_cw20_transfer_msg(contract_addr, &config.admin, game_fee)?
+                    }
+                    AssetInfo::NativeToken { denom } => {
+                        get_bank_transfer_to_msg(&config.admin, denom, game_fee)?
+                    }
+                };
+                transfer_msgs.push(transfer_msg);
+            }
+        }
     }
     Ok(transfer_msgs)
+}
+
+fn execute_withdraw_from_pool(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    room_id: u64,
+    amount: Uint128,
+) -> Result<Response, ContractError> {
+    let room_info = validate_room_id(deps.as_ref(), room_id)?;
+    let contract_address = env.contract.address;
+    assert_is_room_owner(deps.as_ref(), &info, &room_info)?;
+    let withdrawal_amount = get_withdrawal_amount(deps.as_ref(), &room_info, &contract_address)?;
+    if withdrawal_amount < amount {
+        return Err(ContractError::WithdrawalMoneyExceeded {
+            withdrawal_amount,
+            amount,
+        });
+    }
+
+    let transfer_msg = match room_info.game_denom {
+        AssetInfo::Token { contract_addr } => {
+            get_cw20_transfer_msg(&contract_addr, &info.sender, amount)?
+        }
+        AssetInfo::NativeToken { denom } => get_bank_transfer_to_msg(&info.sender, &denom, amount)?,
+    };
+
+    Ok(Response::new()
+        .add_message(transfer_msg)
+        .add_attribute("withdrawer", info.sender.to_string())
+        .add_attribute("room_id", room_id.to_string())
+        .add_attribute("amount", amount))
+}
+
+fn execute_deposit(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    room_id: u64,
+    amount: Uint128,
+) -> Result<Response, ContractError> {
+    let room_info = validate_room_id(deps.as_ref(), room_id)?;
+    let game_denom = room_info.clone().game_denom;
+    let contract_address = env.contract.address;
+
+    assert_is_room_owner(deps.as_ref(), &info, &room_info)?;
+    validate_input_amount(&info.funds, amount, &game_denom)?;
+
+    let player = info.sender;
+
+    println!("room_info {:?}", room_info);
+    match room_info.game_denom {
+        AssetInfo::Token { contract_addr } => {
+            let cw20_transfer_from_msg =
+                get_cw20_transfer_from_msg(&contract_addr, &player, &contract_address, amount)?;
+
+            Ok(Response::new()
+                .add_attributes(vec![
+                    attr("action", "deposit"),
+                    attr("room_id", room_id.to_string()),
+                    attr("amount", amount.to_string()),
+                ])
+                .add_message(cw20_transfer_from_msg))
+        }
+        AssetInfo::NativeToken { denom: _denom } => Ok(Response::new().add_attributes(vec![
+            attr("action", "deposit"),
+            attr("room_id", room_id.to_string()),
+            attr("amount", amount.to_string()),
+        ])),
+    }
+}
+
+fn execute_change_room_config(
+    deps: DepsMut,
+    info: MessageInfo,
+    room_id: u64,
+    room_name: String,
+    nft_id: String,
+) -> Result<Response, ContractError> {
+    assert_is_admin(deps.as_ref(), info)?;
+    validate_room_id(deps.as_ref(), room_id)?;
+
+    ROOMS.update(
+        deps.storage,
+        &room_id.to_string(),
+        |room_info| -> StdResult<_> {
+            let mut room_info = room_info.unwrap();
+            room_info.room_name = room_name.clone();
+            room_info.nft_id = nft_id.clone();
+            Ok(room_info)
+        },
+    )?;
+
+    Ok(Response::new()
+        .add_attribute("action", "room_update")
+        .add_attribute("room_name", room_name)
+        .add_attribute("nft_id", nft_id))
 }
 
 fn assert_not_haulted(deps: Deps) -> StdResult<bool> {
@@ -276,6 +418,35 @@ fn assert_is_admin(deps: Deps, info: MessageInfo) -> StdResult<bool> {
         return Err(StdError::generic_err(format!(
             "Only the admin can execute this function. Admin: {}, Sender: {}",
             config.admin, info.sender
+        )));
+    }
+
+    Ok(true)
+}
+
+fn assert_is_room_owner(deps: Deps, info: &MessageInfo, room: &RoomConfig) -> StdResult<bool> {
+    let config = CONFIG.load(deps.storage)?;
+
+    let nft_contract = config.nft_contract.to_string();
+    let nft_id = room.nft_id.clone();
+    //room owner is considerd as NFT, so will check the owner of this NFT
+
+    let nft_info: AllNftInfoResponse<Option<Empty>> =
+        deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+            contract_addr: nft_contract,
+            msg: to_binary(&Cw721QueryMsg::AllNftInfo {
+                token_id: nft_id,
+                include_expired: None,
+            })?,
+        }))?;
+
+    let room_owner = nft_info.access.owner;
+    println!("room_owner, {:?}", room_owner);
+
+    if info.sender.to_string() != room_owner {
+        return Err(StdError::generic_err(format!(
+            "Only the admin of room can execute this function. Room Admin: {}, Sender: {}",
+            room_owner, info.sender
         )));
     }
 
@@ -329,13 +500,9 @@ fn assert_not_double_bet(
 
 fn validate_input_amount(
     actual_funds: &[Coin],
-    bet_info: &Vec<BetConfig>,
+    amount: Uint128,
     game_denom: &AssetInfo,
 ) -> Result<(), ContractError> {
-    let mut amount = Uint128::zero();
-    for bet in bet_info {
-        amount = amount + bet.amount;
-    }
     match game_denom {
         AssetInfo::Token {
             contract_addr: _contract_address,
@@ -356,12 +523,32 @@ fn validate_input_amount(
     }
 }
 
-fn validate_room_id(deps: Deps, room_id: u64) -> StdResult<()> {
+pub fn get_withdrawal_amount(
+    deps: Deps,
+    room_info: &RoomConfig,
+    recipient: &Addr,
+) -> StdResult<Uint128> {
+    let room_denom = room_info.game_denom.clone();
+    let balance = match room_denom {
+        AssetInfo::Token { contract_addr } => {
+            get_cw20_token_amount(deps, &contract_addr, recipient)?
+        }
+        AssetInfo::NativeToken { denom } => get_native_token_amount(deps, &denom, recipient)?,
+    };
+    println!("balance {:?}", balance);
+    let minimum_limit_for_pool = MINIMUMRESERVE.load(deps.storage)?;
+    //admin can not withdraw money which is really exceeded than user's limit
+    let maximum_withdrawal = balance - minimum_limit_for_pool;
+
+    Ok(maximum_withdrawal)
+}
+
+fn validate_room_id(deps: Deps, room_id: u64) -> StdResult<RoomConfig> {
     let room = ROOMS.may_load(deps.storage, &room_id.to_string())?;
     if room.is_none() {
         return Err(StdError::generic_err(format!("This room does not exist")));
     }
-    Ok(())
+    Ok(room.unwrap())
 }
 
 fn validate_maximum_reward_exceed(
@@ -679,14 +866,4 @@ fn get_cw20_token_amount(deps: Deps, contract_addr: &Addr, recipient: &Addr) -> 
         }),
     )?;
     Ok(balance.balance)
-}
-
-#[test]
-fn rand() {
-    let info = mock_info("admin", &[]);
-    let mut env = mock_env();
-    env.block.time = env.block.time.plus_seconds(100065);
-
-    let random = rand_generator(&info, &env);
-    println!("random {:?}", random)
 }

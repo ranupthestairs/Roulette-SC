@@ -22,7 +22,17 @@ pub enum ExecuteMsg {
     },
     CloseRound {},
     WithdrawFromPool {
+        room_id: u64,
         amount: Uint128,
+    },
+    Deposit {
+        room_id: u64,
+        amount: Uint128,
+    },
+    ChangeRoomConfig {
+        room_id: u64,
+        room_name: String,
+        nft_id: String,
     },
 }
 
@@ -46,6 +56,16 @@ pub enum QueryMsg {
     GetPlayerInfosForRoom {
         room_id: u64,
         player: Addr,
+        start_after: Option<u64>,
+        limit: Option<u32>,
+    },
+    GetMaximumWithdrawlFromRoom {
+        room_id: u64,
+    },
+    GetWinnerRound {
+        round_id: u64,
+    },
+    GetWinnerLists {
         start_after: Option<u64>,
         limit: Option<u32>,
     },
@@ -80,6 +100,27 @@ pub struct BetsInfoResponse {
 }
 
 #[cw_serde]
+pub struct WithdrawResponse {
+    pub amount: Uint128,
+}
+
+#[cw_serde]
+pub struct Winner {
+    pub winner: u32,
+    pub round_id: String,
+}
+
+#[cw_serde]
+pub struct WinnerResponse {
+    pub winner: Winner,
+}
+
+#[cw_serde]
+pub struct WinnerListResponse {
+    pub winner_list: Vec<Winner>,
+}
+
+#[cw_serde]
 pub enum Direction {
     Odd,
     Even,
@@ -108,6 +149,9 @@ pub struct PointRatioInfo {
     pub points: Vec<u32>,
     pub ratio: u32,
 }
+
+#[cw_serde]
+pub struct NftMetadata {}
 
 impl Into<std::string::String> for Direction {
     fn into(self) -> std::string::String {

@@ -1,5 +1,5 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Addr, Uint128};
+use cosmwasm_std::{Addr, Decimal, Uint128};
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
 
 use crate::msg::{BetConfig, Direction};
@@ -18,6 +18,7 @@ pub struct Config {
     pub maximum_bet: Uint128,
     pub next_round_seconds: u64,
     pub distributor: Addr,
+    pub platform_fee: Decimal,
 }
 
 #[cw_serde]
