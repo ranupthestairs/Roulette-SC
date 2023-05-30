@@ -1,7 +1,10 @@
 use std::vec;
 
 // use cosmwasm_std::testing::mock_env;
-use cosmwasm_std::{Addr, Coin, Decimal, Empty, StdResult, Uint128, WasmMsg};
+use cosmwasm_std::{
+    testing::mock_env, Addr, BlockInfo, Coin, Decimal, Empty, StdResult, Timestamp, Uint128,
+    WasmMsg,
+};
 
 use cw20::{BalanceResponse, Cw20Coin, Cw20ExecuteMsg, Cw20QueryMsg};
 use cw721_base::{
@@ -54,7 +57,7 @@ pub fn cw20_contract() -> Box<dyn Contract<Empty>> {
 
 fn init_roulette_contract(router: &mut App, nft_address: Addr) -> Addr {
     let msg = InstantiateMsg {
-        conifg: Config {
+        config: Config {
             admin: Addr::unchecked("admin"),
             nft_contract: nft_address,
             minimum_bet: Uint128::new(1),
@@ -373,16 +376,10 @@ fn test_bet_with_native_token() {
 
     let bet_msg = ExecuteMsg::Bet {
         room_id: 1,
-        bet_info: vec![
-            BetConfig {
-                direction: Direction::FirstHalf,
-                amount: Uint128::new(200),
-            },
-            BetConfig {
-                direction: Direction::SecondHalf,
-                amount: Uint128::new(200),
-            },
-        ],
+        bet_info: vec![BetConfig {
+            direction: Direction::FirstHalf,
+            amount: Uint128::new(200),
+        }],
     };
 
     router
@@ -392,7 +389,7 @@ fn test_bet_with_native_token() {
             &bet_msg,
             &[Coin {
                 denom: "usei".to_string(),
-                amount: Uint128::new(400),
+                amount: Uint128::new(200),
             }],
         )
         .unwrap();
@@ -456,6 +453,12 @@ fn test_bet_with_native_token() {
 #[test]
 fn test_close_round() {
     let mut router = mock_app();
+    router.set_block(BlockInfo {
+        height: 0,
+        time: Timestamp::from_seconds(0),
+        chain_id: "chain-1".to_string(),
+    });
+
     let nft_address = init_cw721_contract_and_mint(&mut router);
     let roulette_address = init_roulette_contract(&mut router, nft_address);
     let token_address = init_cw20_contract(&mut router, &roulette_address);
@@ -465,16 +468,10 @@ fn test_close_round() {
 
     let bet_msg = ExecuteMsg::Bet {
         room_id: 1,
-        bet_info: vec![
-            BetConfig {
-                direction: Direction::SecondOfThird,
-                amount: Uint128::new(100),
-            },
-            BetConfig {
-                direction: Direction::SecondHalf,
-                amount: Uint128::new(500),
-            },
-        ],
+        bet_info: vec![BetConfig {
+            direction: Direction::SecondOfThird,
+            amount: Uint128::new(100),
+        }],
     };
 
     router
@@ -484,10 +481,16 @@ fn test_close_round() {
             &bet_msg,
             &[Coin {
                 denom: "usei".to_string(),
-                amount: Uint128::new(600),
+                amount: Uint128::new(100),
             }],
         )
         .unwrap();
+
+    router.set_block(BlockInfo {
+        height: 0,
+        time: Timestamp::from_seconds(100),
+        chain_id: "chain-1".to_string(),
+    });
 
     router
         .execute_contract(
@@ -495,7 +498,7 @@ fn test_close_round() {
             token_address.clone(),
             &Cw20ExecuteMsg::IncreaseAllowance {
                 spender: roulette_address.to_string(),
-                amount: Uint128::new(1200),
+                amount: Uint128::new(200),
                 expires: None,
             },
             &[],
@@ -504,16 +507,10 @@ fn test_close_round() {
 
     let bet_msg = ExecuteMsg::Bet {
         room_id: 2,
-        bet_info: vec![
-            BetConfig {
-                direction: Direction::SecondOfThird,
-                amount: Uint128::new(200),
-            },
-            BetConfig {
-                direction: Direction::SecondHalf,
-                amount: Uint128::new(1000),
-            },
-        ],
+        bet_info: vec![BetConfig {
+            direction: Direction::SecondOfThird,
+            amount: Uint128::new(200),
+        }],
     };
 
     router
@@ -524,6 +521,12 @@ fn test_close_round() {
             &[],
         )
         .unwrap();
+
+    router.set_block(BlockInfo {
+        height: 0,
+        time: Timestamp::from_seconds(121),
+        chain_id: "chain-1".to_string(),
+    });
 
     let close_round_msg = ExecuteMsg::CloseRound {};
     router
@@ -576,16 +579,10 @@ fn test_withdraw() {
 
     let bet_msg = ExecuteMsg::Bet {
         room_id: 1,
-        bet_info: vec![
-            BetConfig {
-                direction: Direction::SecondOfThird,
-                amount: Uint128::new(100),
-            },
-            BetConfig {
-                direction: Direction::SecondHalf,
-                amount: Uint128::new(100),
-            },
-        ],
+        bet_info: vec![BetConfig {
+            direction: Direction::SecondOfThird,
+            amount: Uint128::new(100),
+        }],
     };
 
     router
@@ -595,7 +592,7 @@ fn test_withdraw() {
             &bet_msg,
             &[Coin {
                 denom: "usei".to_string(),
-                amount: Uint128::new(200),
+                amount: Uint128::new(100),
             }],
         )
         .unwrap();
@@ -618,28 +615,6 @@ fn test_withdraw() {
             Addr::unchecked("sei_admin"),
             roulette_address.clone(),
             &withdraw_msg,
-            &[],
-        )
-        .unwrap();
-
-    let close_round_msg = ExecuteMsg::CloseRound {};
-
-    router
-        .execute_contract(
-            Addr::unchecked("distributor"),
-            roulette_address.clone(),
-            &close_round_msg,
-            &[],
-        )
-        .unwrap();
-
-    let close_round_msg = ExecuteMsg::CloseRound {};
-
-    router
-        .execute_contract(
-            Addr::unchecked("distributor"),
-            roulette_address.clone(),
-            &close_round_msg,
             &[],
         )
         .unwrap();

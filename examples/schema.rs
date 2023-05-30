@@ -3,8 +3,8 @@ use std::fs::create_dir_all;
 
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
 use roulette_game::msg::{
-    BetConfig, BetsInfoResponse, ConfigResponse, Direction, ExecuteMsg, InstantiateMsg,
-    PointRatioInfo, QueryMsg, RoomInfoResponse, RoomsInfoResponse, StateResponse,
+    AllStateResponse, BetConfig, BetsInfoResponse, ConfigResponse, Direction, ExecuteMsg,
+    InstantiateMsg, PointRatioInfo, QueryMsg, RoomInfoResponse, RoomsInfoResponse, StateResponse,
 };
 use roulette_game::state::{AssetInfo, BetInfo, Config, RoomConfig, State};
 
@@ -34,4 +34,5 @@ fn main() {
     export_schema(&schema_for!(RoomInfoResponse), &out_dir);
     export_schema(&schema_for!(RoomsInfoResponse), &out_dir);
     export_schema(&schema_for!(StateResponse), &out_dir);
+    export_schema(&schema_for!(AllStateResponse), &out_dir);
 }

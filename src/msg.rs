@@ -5,7 +5,7 @@ use crate::state::{BetInfo, Config, RoomConfig, State};
 
 #[cw_serde]
 pub struct InstantiateMsg {
-    pub conifg: Config,
+    pub config: Config,
 }
 
 #[cw_serde]
@@ -40,6 +40,7 @@ pub enum ExecuteMsg {
 pub enum QueryMsg {
     Config {},
     State {},
+    AllState {},
     GetRoom {
         room_id: u64,
     },
@@ -85,6 +86,13 @@ pub struct StateResponse {
 }
 
 #[cw_serde]
+pub struct AllStateResponse {
+    pub state: State,
+    pub config: Config,
+    pub crr_time: u64,
+}
+
+#[cw_serde]
 pub struct RoomInfoResponse {
     pub room: RoomConfig,
 }
@@ -126,7 +134,7 @@ pub enum Direction {
     Even,
     FirstHalf,
     SecondHalf,
-    Red,
+    Blue,
     Black,
     Row { id: u32 },
     Column { id: u32 },
@@ -158,7 +166,7 @@ impl Into<std::string::String> for Direction {
             Direction::Even => "even".to_string(),
             Direction::FirstHalf => "first_half".to_string(),
             Direction::SecondHalf => "second_half".to_string(),
-            Direction::Red => "red".to_string(),
+            Direction::Blue => "red".to_string(),
             Direction::Black => "black".to_string(),
             Direction::Row { id: _ } => "row".to_string(),
             Direction::Column { id: _ } => "column".to_string(),

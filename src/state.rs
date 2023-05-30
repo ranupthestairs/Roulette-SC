@@ -9,6 +9,7 @@ pub const STATE: Item<State> = Item::new("state");
 pub const MINIMUMRESERVE: Item<Uint128> = Item::new("minimum_reserve");
 pub const ROOMS: Map<&str, RoomConfig> = Map::new("rounds");
 pub const WINNERNUMBER: Map<&str, u32> = Map::new("random_winner");
+pub const ROUND_START_SECOND: Map<&str, u64> = Map::new("round_start_second");
 
 #[cw_serde]
 pub struct Config {
@@ -49,6 +50,7 @@ pub struct BetInfo {
     pub round_id: String,
     pub room_id: String,
     pub bet_info: Vec<BetConfig>,
+    pub bet_time: u64,
 }
 
 // /// Primary key for betinfo: (room_id, round_id, player)

@@ -4,8 +4,8 @@ use cw_storage_plus::Bound;
 
 use crate::execute::get_withdrawal_amount;
 use crate::msg::{
-    BetsInfoResponse, ConfigResponse, QueryMsg, RoomInfoResponse, RoomsInfoResponse, StateResponse,
-    Winner, WinnerListResponse, WinnerResponse, WithdrawResponse,
+    AllStateResponse, BetsInfoResponse, ConfigResponse, QueryMsg, RoomInfoResponse,
+    RoomsInfoResponse, StateResponse, Winner, WinnerListResponse, WinnerResponse, WithdrawResponse,
 };
 use crate::state::{bet_info_key, bet_info_storage, CONFIG, ROOMS, STATE, WINNERNUMBER};
 
@@ -18,6 +18,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::State {} => to_binary(&query_state(deps)?),
         QueryMsg::GetRoom { room_id } => to_binary(&query_room_info(deps, room_id)?),
+        QueryMsg::AllState {} => to_binary(&query_all_state(deps, env)?),
         QueryMsg::GetRooms { start_after, limit } => {
             to_binary(&query_get_rooms(deps, start_after, limit)?)
         }
@@ -63,6 +64,17 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
 fn query_state(deps: Deps) -> StdResult<StateResponse> {
     let state = STATE.load(deps.storage)?;
     Ok(StateResponse { state })
+}
+
+fn query_all_state(deps: Deps, env: Env) -> StdResult<AllStateResponse> {
+    let state = STATE.load(deps.storage)?;
+    let config = CONFIG.load(deps.storage)?;
+    let crr_time = env.block.time.seconds();
+    Ok(AllStateResponse {
+        state,
+        config,
+        crr_time,
+    })
 }
 
 fn query_room_info(deps: Deps, room_id: u64) -> StdResult<RoomInfoResponse> {

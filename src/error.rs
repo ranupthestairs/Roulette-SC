@@ -13,8 +13,20 @@ pub enum ContractError {
     #[error("InsufficientFunds")]
     InsufficientFunds {},
 
+    #[error("You can not bet more than 19 points bets at the same time.")]
+    ExceedBetPoints {},
+
     #[error("Incorrect native denom: provided: {provided}, required: {required}")]
     IncorrectNativeDenom { provided: String, required: String },
+
+    #[error("This round is not started, so you can not close it")]
+    RoundNotStarted {},
+
+    #[error("This round is not finished, so you can not close it")]
+    RoundNotFinished {},
+
+    #[error("This round is finished, you can not bet")]
+    RoundFinished {},
 
     #[error("You can withdraw ax maximum {withdrawal_amount} because of current user's betting reward for maximum case, now you are trying to withdraw {amount}")]
     WithdrawalMoneyExceeded {

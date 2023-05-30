@@ -4,7 +4,7 @@ use crate::msg::{
 };
 use crate::state::{
     bet_info_key, bet_info_storage, AssetInfo, BetInfo, Config, RoomConfig, State, CONFIG,
-    MINIMUMRESERVE, ROOMS, STATE, WINNERNUMBER,
+    MINIMUMRESERVE, ROOMS, ROUND_START_SECOND, STATE, WINNERNUMBER,
 };
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
@@ -23,6 +23,7 @@ use rand_chacha::ChaChaRng;
 
 const CONTRACT_NAME: &str = "Cosmos-first-roulette-gaming";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
+const MAXIMUM_SELECT: usize = 19;
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
@@ -33,7 +34,7 @@ pub fn instantiate(
 ) -> Result<Response, ContractError> {
     cw2::set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
     /* Validate addresses */
-    CONFIG.save(deps.storage, &msg.conifg)?;
+    CONFIG.save(deps.storage, &msg.config)?;
     STATE.save(
         deps.storage,
         &(State {
@@ -137,22 +138,49 @@ fn execute_bet(
     bet_info: Vec<BetConfig>,
 ) -> Result<Response, ContractError> {
     let player = info.sender;
+    let crr_time = env.block.time.seconds();
+    let state = STATE.load(deps.storage)?;
+    let config = CONFIG.load(deps.storage)?;
+    let living_round = state.living_round;
     //validate if this room is avaialble.
     validate_room_id(deps.as_ref(), room_id)?;
 
+    let round_start_time = ROUND_START_SECOND.may_load(deps.storage, &living_round.to_string())?;
+    match round_start_time {
+        None => {}
+        Some(round_start_time) => {
+            if crr_time - round_start_time > config.next_round_seconds {
+                return Err(ContractError::RoundFinished {});
+            }
+        }
+    }
+
+    //we can close the round after the first bet
+    let round_start_second =
+        ROUND_START_SECOND.may_load(deps.storage, &living_round.to_string())?;
+
+    if round_start_second.is_none() {
+        ROUND_START_SECOND.save(deps.storage, &living_round.to_string(), &crr_time)?;
+    }
+
     let room_info = ROOMS.load(deps.storage, &room_id.to_string())?;
-    let state = STATE.load(deps.storage)?;
-    let living_round = state.living_round;
     let contract_address = env.contract.address;
 
     //for the token transfer
     let mut total_bet_amount = Uint128::zero();
+    let mut total_point = 0;
 
     let mut bet_info_attributes: Vec<Attribute> = Vec::new();
     for bet in &bet_info {
         bet_info_attributes.push(attr("amount", bet.amount));
         bet_info_attributes.push(attr("direction", bet.direction.clone()));
         total_bet_amount = total_bet_amount + bet.amount;
+        let point_info = get_points_ratio_information(&bet.direction)?;
+        total_point = total_point + point_info.points.len();
+    }
+
+    if total_point > MAXIMUM_SELECT {
+        return Err(ContractError::ExceedBetPoints {});
     }
 
     //check if this game is haulted or not
@@ -174,7 +202,6 @@ fn execute_bet(
     )?;
 
     MINIMUMRESERVE.save(deps.storage, &withdraw_limit_for_admin)?;
-    println!("withdraw_limit_for_admin, {:?}", withdraw_limit_for_admin);
 
     let bet_info_key = bet_info_key(room_id, state.living_round, &player);
     //save user bet info
@@ -186,6 +213,7 @@ fn execute_bet(
             round_id: state.living_round.to_string(),
             room_id: room_id.to_string(),
             bet_info: bet_info.clone(),
+            bet_time: crr_time,
         },
     )?;
 
@@ -216,10 +244,22 @@ fn execute_bet(
 }
 
 fn execute_close(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError> {
-    let winner = rand_generator(&info, &env);
-    println!("winner {:?}", winner);
+    let crr_time = env.block.time.seconds();
     let state = STATE.load(deps.storage)?;
+    let config = CONFIG.load(deps.storage)?;
     let living_round = state.living_round;
+
+    let round_start_time = ROUND_START_SECOND.may_load(deps.storage, &living_round.to_string())?;
+    match round_start_time {
+        None => return Err(ContractError::RoundNotStarted {}),
+        Some(round_start_time) => {
+            if crr_time - round_start_time < config.next_round_seconds {
+                return Err(ContractError::RoundNotFinished {});
+            }
+        }
+    }
+
+    let winner = rand_generator(&info, &env);
 
     assert_is_distributor(deps.as_ref(), info)?;
 
@@ -281,10 +321,6 @@ fn distribute_reward_to_users(
             }
         }
 
-        println!(
-            "total bet amount {:?} user bet amount {:?}",
-            total_bet_amount, user_winning_amount
-        );
         //send some percent of round reward to the admin as platform fee.
         if total_bet_amount > user_winning_amount {
             let reward_for_admin_side = total_bet_amount - user_winning_amount;
@@ -353,7 +389,6 @@ fn execute_deposit(
 
     let player = info.sender;
 
-    println!("room_info {:?}", room_info);
     match room_info.game_denom {
         AssetInfo::Token { contract_addr } => {
             let cw20_transfer_from_msg =
@@ -441,7 +476,6 @@ fn assert_is_room_owner(deps: Deps, info: &MessageInfo, room: &RoomConfig) -> St
         }))?;
 
     let room_owner = nft_info.access.owner;
-    println!("room_owner, {:?}", room_owner);
 
     if info.sender.to_string() != room_owner {
         return Err(StdError::generic_err(format!(
@@ -535,7 +569,7 @@ pub fn get_withdrawal_amount(
         }
         AssetInfo::NativeToken { denom } => get_native_token_amount(deps, &denom, recipient)?,
     };
-    println!("balance {:?}", balance);
+
     let minimum_limit_for_pool = MINIMUMRESERVE.load(deps.storage)?;
     //admin can not withdraw money which is really exceeded than user's limit
     let maximum_withdrawal = balance - minimum_limit_for_pool;
@@ -607,11 +641,6 @@ fn validate_maximum_reward_exceed(
             minimum_reserve_limit = maximum_amount_test;
         }
 
-        println!(
-            "point : {:?}, maximum bet amount: {:?}",
-            point, maximum_amount_test
-        );
-
         if maximum_amount_test > token_hold_amount {
             return Err(StdError::GenericErr {
                 msg: format!(
@@ -653,7 +682,7 @@ pub fn get_points_ratio_information(direction: &Direction) -> StdResult<PointRat
             ],
             ratio: 2,
         }),
-        Direction::Red => Ok(PointRatioInfo {
+        Direction::Blue => Ok(PointRatioInfo {
             points: vec![
                 1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36,
             ],
