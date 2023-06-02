@@ -83,6 +83,11 @@ pub fn execute(
             room_name,
             nft_id,
         } => execute_change_room_config(deps, info, room_id, room_name, nft_id),
+        ExecuteMsg::UpdateBetLimit {
+            room_id,
+            max_bet,
+            min_bet,
+        } => execute_update_bet_limit(deps, info, room_id, max_bet, min_bet),
     }
 }
 
@@ -143,7 +148,6 @@ fn execute_bet(
     let config = CONFIG.load(deps.storage)?;
     let living_round = state.living_round;
     //validate if this room is avaialble.
-    validate_room_id(deps.as_ref(), room_id)?;
 
     let round_start_time = ROUND_START_SECOND.may_load(deps.storage, &living_round.to_string())?;
     match round_start_time {
@@ -186,7 +190,7 @@ fn execute_bet(
     //check if this game is haulted or not
     assert_not_haulted(deps.as_ref())?;
     //check the min and maximum limit for game bit
-    assert_min_max_limit(deps.as_ref(), total_bet_amount)?;
+    assert_min_max_limit(total_bet_amount, &room_info)?;
     //user can only bet once on round for the same room
     assert_not_double_bet(deps.as_ref(), room_id, living_round, &player)?;
     //validate the input amount for the case the input denom is native token
@@ -217,7 +221,7 @@ fn execute_bet(
         },
     )?;
 
-    match room_info.game_denom {
+    match room_info.game_denom.clone() {
         AssetInfo::Token { contract_addr } => {
             let cw20_transfer_from_msg = get_cw20_transfer_from_msg(
                 &contract_addr,
@@ -437,6 +441,35 @@ fn execute_change_room_config(
         .add_attribute("nft_id", nft_id))
 }
 
+fn execute_update_bet_limit(
+    deps: DepsMut,
+    info: MessageInfo,
+    room_id: u64,
+    max_bet: Uint128,
+    min_bet: Uint128,
+) -> Result<Response, ContractError> {
+    let room_info = validate_room_id(deps.as_ref(), room_id)?;
+
+    assert_is_room_owner(deps.as_ref(), &info, &room_info)?;
+
+    ROOMS.update(
+        deps.storage,
+        &room_id.to_string(),
+        |room_info| -> StdResult<_> {
+            let mut room_info = room_info.unwrap();
+            room_info.max_bet = max_bet;
+            room_info.min_bet = min_bet;
+            Ok(room_info)
+        },
+    )?;
+
+    Ok(Response::new()
+        .add_attribute("action", "room_update")
+        .add_attribute("room_id", room_id.to_string())
+        .add_attribute("max_bet", max_bet)
+        .add_attribute("min_bet", min_bet))
+}
+
 fn assert_not_haulted(deps: Deps) -> StdResult<bool> {
     let state = STATE.load(deps.storage)?;
     let is_haulted = state.is_haulted;
@@ -500,14 +533,12 @@ fn assert_is_distributor(deps: Deps, info: MessageInfo) -> StdResult<bool> {
     Ok(true)
 }
 
-fn assert_min_max_limit(deps: Deps, total_bet_amount: Uint128) -> StdResult<bool> {
-    let config = CONFIG.load(deps.storage)?;
-
-    if total_bet_amount < config.minimum_bet || total_bet_amount > config.maximum_bet {
+fn assert_min_max_limit(total_bet_amount: Uint128, room_info: &RoomConfig) -> StdResult<bool> {
+    if total_bet_amount < room_info.min_bet || total_bet_amount > room_info.max_bet {
         return Err(StdError::GenericErr {
             msg: format!(
                 "You must bet with the amount between {}  and {}",
-                config.minimum_bet, config.maximum_bet
+                room_info.min_bet, room_info.max_bet
             ),
         });
     }

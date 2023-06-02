@@ -5,9 +5,13 @@ use cw_storage_plus::Bound;
 use crate::execute::get_withdrawal_amount;
 use crate::msg::{
     AllStateResponse, BetsInfoResponse, ConfigResponse, QueryMsg, RoomInfoResponse,
-    RoomsInfoResponse, StateResponse, Winner, WinnerListResponse, WinnerResponse, WithdrawResponse,
+    RoomsInfoResponse, RoundOffset, StateResponse, Winner, WinnerListResponse, WinnerResponse,
+    WithdrawResponse,
 };
-use crate::state::{bet_info_key, bet_info_storage, CONFIG, ROOMS, STATE, WINNERNUMBER};
+use crate::state::{
+    bet_info_key, bet_info_storage, RoomInfo, CONFIG, ROOMS, ROUND_START_SECOND, STATE,
+    WINNERNUMBER,
+};
 
 const DEFAULT_QUERY_LIMIT: u32 = 10;
 const MAX_QUERY_LIMIT: u32 = 30;
@@ -30,6 +34,16 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         } => to_binary(&query_get_players_for_one_round_one_room(
             deps,
             room_id,
+            round_id,
+            start_after,
+            limit,
+        )?),
+        QueryMsg::GetGameInfoForRound {
+            round_id,
+            start_after,
+            limit,
+        } => to_binary(&query_get_game_info_for_round(
+            deps,
             round_id,
             start_after,
             limit,
@@ -70,16 +84,31 @@ fn query_all_state(deps: Deps, env: Env) -> StdResult<AllStateResponse> {
     let state = STATE.load(deps.storage)?;
     let config = CONFIG.load(deps.storage)?;
     let crr_time = env.block.time.seconds();
+    let round_start_second =
+        match ROUND_START_SECOND.may_load(deps.storage, &state.living_round.to_string())? {
+            Some(round_second) => round_second,
+            None => 0,
+        };
     Ok(AllStateResponse {
         state,
         config,
         crr_time,
+        round_start_second,
     })
 }
 
 fn query_room_info(deps: Deps, room_id: u64) -> StdResult<RoomInfoResponse> {
     let room = ROOMS.load(deps.storage, &room_id.to_string())?;
-    Ok(RoomInfoResponse { room })
+    Ok(RoomInfoResponse {
+        room: RoomInfo {
+            room_name: room.room_name,
+            game_denom: room.game_denom,
+            nft_id: room.nft_id,
+            room_id: room_id.to_string(),
+            max_bet: room.max_bet,
+            min_bet: room.min_bet,
+        },
+    })
 }
 
 fn query_get_rooms(
@@ -93,7 +122,16 @@ fn query_get_rooms(
     let rooms = ROOMS
         .range(deps.storage, start, None, Order::Ascending)
         .take(limit)
-        .map(|res| res.map(|item| item.1))
+        .map(|res| {
+            res.map(|item| RoomInfo {
+                room_name: item.1.room_name,
+                game_denom: item.1.game_denom,
+                nft_id: item.1.nft_id,
+                room_id: item.0,
+                max_bet: item.1.max_bet,
+                min_bet: item.1.min_bet,
+            })
+        })
         .collect::<StdResult<Vec<_>>>()?;
     Ok(RoomsInfoResponse { rooms })
 }
@@ -120,6 +158,35 @@ fn query_get_players_for_one_round_one_room(
         .idx
         .room_round_players
         .prefix((room_id.to_string(), round_id.to_string()))
+        .range(deps.storage, start, None, Order::Ascending)
+        .take(limit)
+        .map(|item| item.map(|(_, b)| b))
+        .collect::<StdResult<Vec<_>>>()?;
+
+    Ok(BetsInfoResponse { bets_info })
+}
+
+fn query_get_game_info_for_round(
+    deps: Deps,
+    round_id: u64,
+    start_after: Option<RoundOffset>,
+    limit: Option<u32>,
+) -> StdResult<BetsInfoResponse> {
+    let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT).min(MAX_QUERY_LIMIT) as usize;
+    let start = if let Some(start) = start_after {
+        Some(Bound::exclusive(bet_info_key(
+            start.room_id,
+            round_id,
+            &start.player,
+        )))
+    } else {
+        None
+    };
+
+    let bets_info = bet_info_storage()
+        .idx
+        .round_id
+        .prefix(round_id.to_string())
         .range(deps.storage, start, None, Order::Ascending)
         .take(limit)
         .map(|item| item.map(|(_, b)| b))

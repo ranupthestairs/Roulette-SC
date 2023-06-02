@@ -16,8 +16,8 @@ use cw_multi_test::{App, BankSudo, Contract, ContractWrapper, Executor, SudoMsg}
 use crate::{
     msg::{
         BetConfig, BetsInfoResponse, ConfigResponse, Direction, ExecuteMsg, InstantiateMsg,
-        QueryMsg, RoomInfoResponse, RoomsInfoResponse, WinnerListResponse, WinnerResponse,
-        WithdrawResponse,
+        QueryMsg, RoomInfoResponse, RoomsInfoResponse, RoundOffset, WinnerListResponse,
+        WinnerResponse, WithdrawResponse,
     },
     state::{AssetInfo, Config, RoomConfig},
 };
@@ -60,8 +60,6 @@ fn init_roulette_contract(router: &mut App, nft_address: Addr) -> Addr {
         config: Config {
             admin: Addr::unchecked("admin"),
             nft_contract: nft_address,
-            minimum_bet: Uint128::new(1),
-            maximum_bet: Uint128::new(2000),
             next_round_seconds: 120,
             distributor: Addr::unchecked("distributor"),
             platform_fee: Decimal::from_ratio(40 as u128, 100 as u128),
@@ -244,6 +242,8 @@ fn init_two_rooms(
                 denom: "usei".to_string(),
             },
             nft_id: "SEI".to_string(),
+            max_bet: Uint128::new(100000),
+            min_bet: Uint128::new(100),
         },
     };
 
@@ -263,6 +263,8 @@ fn init_two_rooms(
                 contract_addr: token_address.clone(),
             },
             nft_id: "TEST".to_string(),
+            max_bet: Uint128::new(100000),
+            min_bet: Uint128::new(100),
         },
     };
 
@@ -287,8 +289,6 @@ fn test_update_config() {
     let new_config = Config {
         admin: Addr::unchecked("new_admin"),
         nft_contract: Addr::unchecked("nft_contract"),
-        minimum_bet: Uint128::new(1),
-        maximum_bet: Uint128::new(1000),
         next_round_seconds: 120,
         distributor: Addr::unchecked("distributor"),
         platform_fee: Decimal::from_ratio(40 as u128, 100 as u128),
@@ -313,8 +313,6 @@ fn test_update_config() {
         Config {
             admin: Addr::unchecked("new_admin"),
             nft_contract: Addr::unchecked("nft_contract"),
-            minimum_bet: Uint128::new(1),
-            maximum_bet: Uint128::new(1000),
             next_round_seconds: 120,
             distributor: Addr::unchecked("distributor"),
             platform_fee: Decimal::from_ratio(40 as u128, 100 as u128),
@@ -335,6 +333,8 @@ fn test_add_room() {
                 denom: "usei".to_string(),
             },
             nft_id: "SEI".to_string(),
+            max_bet: Uint128::new(100000),
+            min_bet: Uint128::new(100),
         },
     };
 
@@ -528,6 +528,23 @@ fn test_close_round() {
         chain_id: "chain-1".to_string(),
     });
 
+    let bet_info: BetsInfoResponse = router
+        .wrap()
+        .query_wasm_smart(
+            roulette_address.clone(),
+            &QueryMsg::GetGameInfoForRound {
+                round_id: 0,
+                start_after: Some(RoundOffset {
+                    room_id: 1,
+                    player: Addr::unchecked("user1"),
+                }),
+                limit: None,
+            },
+        )
+        .unwrap();
+
+    println!("bet_info {:?}", bet_info);
+
     let close_round_msg = ExecuteMsg::CloseRound {};
     router
         .execute_contract(
@@ -536,34 +553,6 @@ fn test_close_round() {
             &close_round_msg,
             &[],
         )
-        .unwrap();
-
-    let bet_info: BetsInfoResponse = router
-        .wrap()
-        .query_wasm_smart(
-            roulette_address.clone(),
-            &QueryMsg::GetPlayerInfosForRoom {
-                room_id: 1,
-                player: Addr::unchecked("user1"),
-                start_after: Some(0),
-                limit: None,
-            },
-        )
-        .unwrap();
-
-    let token_balance: BalanceResponse = router
-        .wrap()
-        .query_wasm_smart(
-            token_address,
-            &Cw20QueryMsg::Balance {
-                address: roulette_address.to_string(),
-            },
-        )
-        .unwrap();
-
-    let native_token_balance = router
-        .wrap()
-        .query_balance(roulette_address, "usei".to_string())
         .unwrap();
 }
 

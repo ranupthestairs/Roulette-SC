@@ -1,7 +1,7 @@
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Addr, Uint128};
 
-use crate::state::{BetInfo, Config, RoomConfig, State};
+use crate::state::{BetInfo, Config, RoomConfig, RoomInfo, State};
 
 #[cw_serde]
 pub struct InstantiateMsg {
@@ -33,6 +33,11 @@ pub enum ExecuteMsg {
         room_id: u64,
         room_name: String,
         nft_id: String,
+    },
+    UpdateBetLimit {
+        room_id: u64,
+        max_bet: Uint128,
+        min_bet: Uint128,
     },
 }
 
@@ -70,10 +75,21 @@ pub enum QueryMsg {
         start_after: Option<u64>,
         limit: Option<u32>,
     },
+    GetGameInfoForRound {
+        round_id: u64,
+        start_after: Option<RoundOffset>,
+        limit: Option<u32>,
+    },
 }
 
 #[cw_serde]
-pub enum MigrateMsg {}
+pub struct RoundOffset {
+    pub room_id: u64,
+    pub player: Addr,
+}
+
+#[cw_serde]
+pub struct MigrateMsg {}
 
 #[cw_serde]
 pub struct ConfigResponse {
@@ -90,16 +106,17 @@ pub struct AllStateResponse {
     pub state: State,
     pub config: Config,
     pub crr_time: u64,
+    pub round_start_second: u64,
 }
 
 #[cw_serde]
 pub struct RoomInfoResponse {
-    pub room: RoomConfig,
+    pub room: RoomInfo,
 }
 
 #[cw_serde]
 pub struct RoomsInfoResponse {
-    pub rooms: Vec<RoomConfig>,
+    pub rooms: Vec<RoomInfo>,
 }
 
 #[cw_serde]

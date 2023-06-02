@@ -15,8 +15,6 @@ pub const ROUND_START_SECOND: Map<&str, u64> = Map::new("round_start_second");
 pub struct Config {
     pub admin: Addr,
     pub nft_contract: Addr,
-    pub minimum_bet: Uint128,
-    pub maximum_bet: Uint128,
     pub next_round_seconds: u64,
     pub distributor: Addr,
     pub platform_fee: Decimal,
@@ -34,6 +32,18 @@ pub struct RoomConfig {
     pub room_name: String,
     pub game_denom: AssetInfo,
     pub nft_id: String,
+    pub max_bet: Uint128,
+    pub min_bet: Uint128,
+}
+
+#[cw_serde]
+pub struct RoomInfo {
+    pub room_name: String,
+    pub game_denom: AssetInfo,
+    pub nft_id: String,
+    pub room_id: String,
+    pub max_bet: Uint128,
+    pub min_bet: Uint128,
 }
 
 #[cw_serde]
