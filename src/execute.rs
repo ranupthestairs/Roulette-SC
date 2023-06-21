@@ -265,7 +265,7 @@ fn execute_close(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response,
 
     let winner = rand_generator(&info, &env);
 
-    assert_is_distributor(deps.as_ref(), info)?;
+    // assert_is_distributor(deps.as_ref(), info)?;
 
     WINNERNUMBER.save(deps.storage, &living_round.to_string(), &winner)?;
     //Update the living round
@@ -332,10 +332,10 @@ fn distribute_reward_to_users(
             if game_fee > Uint128::zero() {
                 let transfer_msg = match &room_info.game_denom {
                     AssetInfo::Token { contract_addr } => {
-                        get_cw20_transfer_msg(contract_addr, &config.admin, game_fee)?
+                        get_cw20_transfer_msg(contract_addr, &config.distributor, game_fee)?
                     }
                     AssetInfo::NativeToken { denom } => {
-                        get_bank_transfer_to_msg(&config.admin, denom, game_fee)?
+                        get_bank_transfer_to_msg(&config.distributor, denom, game_fee)?
                     }
                 };
                 transfer_msgs.push(transfer_msg);
