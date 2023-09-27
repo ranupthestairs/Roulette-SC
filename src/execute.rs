@@ -309,8 +309,10 @@ fn distribute_reward_to_users(
                 let point_ratio_info = get_points_ratio_information(&bet.direction)?;
                 let index = point_ratio_info.points.iter().position(|&x| x == winner);
                 if index.is_some() {
-                    let reward = bet.amount * Uint128::new(point_ratio_info.ratio as u128);
-                    user_winning_amount = user_winning_amount + reward;
+                    let reward_without_fee =
+                        bet.amount * Uint128::new(point_ratio_info.ratio as u128);
+                    user_winning_amount = user_winning_amount + reward_without_fee;
+                    let reward = reward_without_fee * (Decimal::one() - config.platform_fee);
                     let recipient = &deps.api.addr_validate(&player_info.player)?;
                     let transfer_msg = match &room_info.game_denom {
                         AssetInfo::Token { contract_addr } => {
@@ -325,21 +327,27 @@ fn distribute_reward_to_users(
             }
         }
 
+        //check game fee
+        //first check for winners fee
+        let mut game_fee = user_winning_amount * config.platform_fee;
+
+        //second check for the admin
         //send some percent of round reward to the admin as platform fee.
         if total_bet_amount > user_winning_amount {
             let reward_for_admin_side = total_bet_amount - user_winning_amount;
-            let game_fee = reward_for_admin_side * config.platform_fee;
-            if game_fee > Uint128::zero() {
-                let transfer_msg = match &room_info.game_denom {
-                    AssetInfo::Token { contract_addr } => {
-                        get_cw20_transfer_msg(contract_addr, &config.distributor, game_fee)?
-                    }
-                    AssetInfo::NativeToken { denom } => {
-                        get_bank_transfer_to_msg(&config.distributor, denom, game_fee)?
-                    }
-                };
-                transfer_msgs.push(transfer_msg);
-            }
+            game_fee = game_fee + reward_for_admin_side * config.platform_fee;
+        }
+
+        if game_fee > Uint128::zero() {
+            let transfer_msg = match &room_info.game_denom {
+                AssetInfo::Token { contract_addr } => {
+                    get_cw20_transfer_msg(contract_addr, &config.distributor, game_fee)?
+                }
+                AssetInfo::NativeToken { denom } => {
+                    get_bank_transfer_to_msg(&config.distributor, denom, game_fee)?
+                }
+            };
+            transfer_msgs.push(transfer_msg);
         }
     }
     Ok(transfer_msgs)
