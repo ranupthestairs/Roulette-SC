@@ -159,8 +159,6 @@ pub enum Direction {
     SecondOfThird,
     ThirdOfThird,
     Single { id: u32 },
-    Zero {},
-    ZeroZero {},
 }
 
 #[cw_serde]
@@ -191,8 +189,6 @@ impl Into<std::string::String> for Direction {
             Direction::SecondOfThird => "second of third".to_string(),
             Direction::ThirdOfThird => "third of third".to_string(),
             Direction::Single { id: _ } => "single".to_string(),
-            Direction::Zero {} => "zero".to_string(),
-            Direction::ZeroZero {} => "zero_zero".to_string(),
         }
     }
 }

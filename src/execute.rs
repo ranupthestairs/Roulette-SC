@@ -773,9 +773,9 @@ pub fn get_points_ratio_information(direction: &Direction) -> StdResult<PointRat
             ratio: 3,
         }),
         Direction::Single { id } => {
-            if *id < 1 || *id > 36 {
+            if *id > 37 {
                 return Err(StdError::GenericErr {
-                    msg: format!("The row select parameter must be in tje range pf 1 to 36 "),
+                    msg: format!("The row select parameter must be in the range of 0 to 37 "),
                 });
             }
             Ok(PointRatioInfo {
@@ -783,14 +783,6 @@ pub fn get_points_ratio_information(direction: &Direction) -> StdResult<PointRat
                 ratio: 36,
             })
         }
-        Direction::Zero {} => Ok(PointRatioInfo {
-            points: vec![0],
-            ratio: 36,
-        }),
-        Direction::ZeroZero {} => Ok(PointRatioInfo {
-            points: vec![37],
-            ratio: 36,
-        }),
     }
 }
 
