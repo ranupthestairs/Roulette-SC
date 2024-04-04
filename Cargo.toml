@@ -1,11 +1,11 @@
 [package]
 name = "roulette-game"
 version = "1.0.0-alpha"
-authors = ["VenusDev0725 <venus07250000@gmail.com>"]
+authors = ["kingpig-dev <peterchenn0302@gmail.com>"]
 edition = "2018"
 description = "Cosmwasm AMM"
 license = "Apache-2.0"
-repository = "https://github.com/VenusDev0725/HopersSwap"
+repository = "https://github.com/kingpig-dev/Roulette-SC"
 
 exclude = [
   # Those files are rust-optimizer artifacts. You might want to commit them for convenience but they should not be part of the source code publication.
